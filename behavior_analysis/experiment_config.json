@@ -17,7 +17,7 @@
     }
   ],
   "analysis_settings": {
-    "midline_borders": 0.6,
+    "midline_borders": 60,
     "threshold": 4,
     "multiple_testing_correction": "bonferroni",
     "significance_level": 0.05

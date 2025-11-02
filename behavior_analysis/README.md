@@ -65,7 +65,7 @@ results = trial.analyse_time()
     }
   ],
   "analysis_settings": {
-    "midline_borders": 0.6,
+    "midline_borders": 60,
     "threshold": 4,
     "multiple_testing_correction": "bonferroni",
     "significance_level": 0.05
@@ -79,7 +79,7 @@ ANALYSIS_PARAMS = {
     'folder_path': r"path/to/your/experiment/folder",
     'config_path': "experiment_config.json",
     'threshold': 4,                    # Minimum choices required
-    'midline_borders': 0.6,           # Midline border threshold
+    'midline_borders': 60,           # Midline border threshold
     'filter_phase': 'both'            # Filtering phases
 }
 ```
@@ -129,7 +129,7 @@ experiment_folder/
 | Parameter | Description | Default | Options |
 |-----------|-------------|---------|---------|
 | `threshold` | Minimum choices required for valid fly | 4 | Any integer ≥ 0 |
-| `midline_borders` | Midline border threshold | 0.6 | 0.0 to 1.0 |
+| `midline_borders` | Midline border threshold | 60 | 0.0 to 100.0 |
 | `filter_phase` | Which phases to filter | 'both' | 'both', 'initial', 'test', 'none' |
 
 ### CS+ Detection
@@ -180,7 +180,7 @@ The package performs comprehensive statistical analysis:
 # Analyze a single trial
 trial = MultiplexTrial()
 trial.load_data("data/fly_loc.csv")
-trial.filter_by_num_choices(0.6, 4, 'both')
+trial.filter_by_num_choices(60, 4, 'both')
 results = trial.analyse_time()
 print(f"Mean learned index: {results['learned_index'].mean():.2f}")
 ```
