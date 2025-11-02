@@ -4,7 +4,7 @@ Uses the shared core module for all analysis functionality.
 Supports both time-based and snapshot-based analysis methods.
 """
 
-from multiplex_core import MultiplexTrial
+from multiplex_analysis import MultiplexTrial
 
 # Example usage
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import json
 import datetime
 from scipy import stats
 from scipy.stats import shapiro, levene, ttest_ind, mannwhitneyu
-from multiplex_core import MultiplexTrial
+from multiplex_analysis import MultiplexTrial
 
 
 def load_experiment_config(config_path="experiment_config.json"):
@@ -950,12 +950,12 @@ if __name__ == "__main__":
     ANALYSIS_PARAMS = {
         'folder_path': r"D:\multiplex\raw_files\new_multiplex_system\system_check\classical_time",
         'config_path': "experiment_config.json",
-        'threshold': 4,                    # Minimum choices required for valid fly
+        'threshold': 1,                    # Minimum choices required for valid fly
         'midline_borders': 60,           # Midline border threshold for filtering (0.0 to 100.0)
         'filter_phase': 'both',           # Which phases to filter: 'both', 'initial', 'test', or 'none'
         'analysis_method': 'time',    # Analysis method: 'time' for time-based, 'snapshot' for population-level, 'learning_valence', 'valence_habituation'
         'determine_side': 0,             # Threshold for determining which side flies are on (0.0 to 100.0)
-        'min_valence_seconds': 10,        # Minimum seconds in initial valence period for valid fly
+        'min_valence_seconds': 0,        # Minimum seconds in initial valence period for valid fly
         'time_window': [80, 110]             # For snapshot analysis: time range [start_seconds, end_seconds] from phase start
     }
     

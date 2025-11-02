@@ -38,7 +38,7 @@ pip install -r requirements.txt
 ### Single Trial Analysis
 
 ```python
-from multiplex_core import MultiplexTrial
+from multiplex_analysis import MultiplexTrial
 
 # Load and analyze a single trial
 trial = MultiplexTrial()
