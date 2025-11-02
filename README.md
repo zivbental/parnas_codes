@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://i.imgur.com/yhcZ4Tl.png" alt="Parnas Lab Code Utilities logo showing a Drosophila coding" width="600"/>
+</p>
+
 # Parnas Lab Code Utilities
 
 This repository contains all code developed in the **Moshe Parnas Lab** for various research projects and data analysis tasks. The repository is organized into specialized modules for different types of experiments and analyses.
