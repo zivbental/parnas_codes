@@ -95,10 +95,10 @@ class MultiplexTrial:
         return filtered_df
 
     @staticmethod
-    def time_spent(df, determine_side=10, sampling_rate=0.1):
+    def time_spent(df, determine_side=10):
         """
-        Calculate time spent on each side of the chamber.
-        Returns a dataframe showing for each fly the time spent on each side.
+        Calculate sample counts for each side of the chamber.
+        Returns a dataframe showing for each fly the number of samples on each side.
         """
         def process_counts(counts):
             df_transposed = counts.reset_index().T
@@ -108,8 +108,9 @@ class MultiplexTrial:
         mask_greater = df > determine_side
         mask_less = df < -determine_side
 
-        count_greater = mask_greater.sum() * sampling_rate
-        count_less = mask_less.sum() * sampling_rate
+        # Count samples (no sampling_rate multiplication - returns raw counts/proportions)
+        count_greater = mask_greater.sum()
+        count_less = mask_less.sum()
 
         count_greater_processed = process_counts(count_greater)
         count_less_processed = process_counts(count_less)
@@ -118,6 +119,409 @@ class MultiplexTrial:
         df_combined.index = ['right_side', 'left_side']
         return df_combined
 
+    @staticmethod
+    def time_spent_v1_style(df, choicepoint_halfwidth=0.2):
+        """
+        Calculate time ratios using V1's exact TimeRatioCalculator logic.
+        Always uses ternary classification with center exclusion.
+        
+        This replicates V1's TimeRatioCalculator.calculate() exactly:
+        - Always uses ternary classification with choicepoint_halfwidth (default 0.2)
+        - Excludes center frames from calculation: total = sum(indices where abs(bvec) == 1)
+        - Returns left and right index sums for compatibility
+        
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame with position data (columns are flies, rows are frames)
+        choicepoint_halfwidth : float
+            Half-width of central choicepoint zone in normalized coordinates (-1 to 1).
+            Default 0.2 means positions within [-0.2, 0.2] are considered center.
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            DataFrame with rows ['right_side', 'left_side'] and columns for each fly.
+            Values are the sum of 1-based frame indices where fly was on that side.
+        """
+        def process_counts(counts):
+            df_transposed = counts.reset_index().T
+            df_transposed.columns = df_transposed.iloc[0]
+            return df_transposed.drop(df_transposed.index[0])
+
+        import numpy as np
+        
+        # V1 logic: always use ternary classification with choicepoint_halfwidth
+        cp = choicepoint_halfwidth
+        
+        sum_greater = {}  # right side
+        sum_less = {}     # left side
+        
+        for col in df.columns:
+            col_data = df[col].values  # Get column data as numpy array
+            
+            # Normalize data to -1 to 1 range for V1 compatibility
+            # V1 uses normalized coordinates where -1 = left, 0 = center, +1 = right
+            # V2 data could be in various scales:
+            # - Already normalized: -1 to 1 (no change needed)
+            # - 0-100 scale: 0 = left, 50 = center, 100 = right
+            # - -50 to +50 scale: -50 = left, 0 = center, +50 = right
+            # - Other scales possible
+            
+            # Normalize data to -1 to 1 range for V1 compatibility
+            # V1 uses normalized coordinates where -1 = left, 0 = center, +1 = right
+            # V2 data is in -100 to 100 scale, so normalize by dividing by 100
+            col_data_abs_max = np.max(np.abs(col_data)) if len(col_data) > 0 else 1
+            
+            # Determine scale based on maximum absolute value
+            if col_data_abs_max <= 1.5:
+                # Already normalized (-1 to 1), use as-is
+                pass
+            elif col_data_abs_max > 50:
+                # V2 scale: -100 to 100, normalize by dividing by 100
+                col_data = col_data / 100
+            elif col_data_abs_max > 1.5 and col_data_abs_max <= 55:
+                # Likely in -50 to +50 scale (centered around 0)
+                # Normalize: divide by 50
+                col_data = col_data / 50
+            else:
+                # Already normalized or very small scale, use as-is
+                pass
+            
+            # V1 ternary classification: -1 (left), 0 (center), 1 (right)
+            # Left: position < -cp
+            # Center: -cp <= position <= cp
+            # Right: position > cp
+            bvec = np.zeros_like(col_data, dtype=int)
+            bvec[col_data > cp] = 1    # Right
+            bvec[col_data < -cp] = -1  # Left
+            # Center remains 0
+            
+            # V1 logic: sum 1-based indices where fly is on left
+            left_indices = np.where(bvec == -1)[0]
+            if len(left_indices) > 0:
+                left_indices_1based = left_indices + 1  # Convert to 1-based
+                leftindex = np.sum(left_indices_1based)
+            else:
+                leftindex = 0
+            
+            # V1 logic: sum 1-based indices where fly is in decision zone (left or right, excluding center)
+            # total = sum(find(abs(bvec)==1))
+            total_indices = np.where(np.abs(bvec) == 1)[0]
+            if len(total_indices) > 0:
+                total_indices_1based = total_indices + 1  # Convert to 1-based
+                total = np.sum(total_indices_1based)
+            else:
+                total = 0
+            
+            # Separate right indices for compatibility with existing code
+            right_indices = np.where(bvec == 1)[0]
+            if len(right_indices) > 0:
+                right_indices_1based = right_indices + 1  # Convert to 1-based
+                sum_greater[col] = np.sum(right_indices_1based)
+            else:
+                sum_greater[col] = 0
+            
+            sum_less[col] = leftindex
+        
+        sum_greater_series = pd.Series(sum_greater)
+        sum_less_series = pd.Series(sum_less)
+        
+        sum_greater_processed = process_counts(sum_greater_series)
+        sum_less_processed = process_counts(sum_less_series)
+
+        df_combined = pd.concat([sum_greater_processed, sum_less_processed])
+        df_combined.index = ['right_side', 'left_side']
+        return df_combined
+
+    @staticmethod
+    def time_spent_matlab(df, determine_side=10):
+        """
+        Calculate time ratios using MATLAB index-summing method.
+        This replicates the logic from timeratio_alistair.m where frame indices
+        are summed instead of counted, creating a time-weighted metric.
+        
+        Uses ternarylocationfunc logic when determine_side corresponds to V1's cp=0.2
+        (which is 20 in V2 scale). This excludes midline frames from the calculation.
+        
+        Returns a dataframe showing for each fly the index-sum ratio.
+        """
+        def process_counts(counts):
+            df_transposed = counts.reset_index().T
+            df_transposed.columns = df_transposed.iloc[0]
+            return df_transposed.drop(df_transposed.index[0])
+
+        import numpy as np
+        
+        # Check if we should use ternary location (exclude midline)
+        # MATLAB's timeratio_alistair uses ternarylocationfunc with cp=0.2 (V1 scale)
+        # In V2 scale, this is 20
+        use_ternary = (determine_side == 20)
+        
+        # MATLAB approach: sum the indices where condition is true
+        # timeratio_alistair: leftindex=sum(find(bvec==-1)); total=sum(find(abs(bvec)==1));
+        sum_greater = {}
+        sum_less = {}
+        
+        for col in df.columns:
+            col_data = df[col].values  # Get column data as numpy array
+            
+            if use_ternary:
+                # Use ternary location: -1 (left), 0 (midline), 1 (right)
+                # Only sum indices for left (-1) and right (1), excluding midline (0)
+                bvec = np.where(col_data > determine_side, 1, np.where(col_data < -determine_side, -1, 0))
+                
+                # MATLAB: leftindex=sum(find(bvec==-1))
+                left_indices = np.where(bvec == -1)[0] + 1  # +1 for 1-indexing
+                leftindex = np.sum(left_indices) if len(left_indices) > 0 else 0
+                
+                # MATLAB: total=sum(find(abs(bvec)==1))  (excludes midline)
+                total_indices = np.where(np.abs(bvec) == 1)[0] + 1
+                total = np.sum(total_indices) if len(total_indices) > 0 else 0
+                
+                # Separate left and right sums for compatibility
+                right_indices = np.where(bvec == 1)[0] + 1
+                sum_greater[col] = np.sum(right_indices) if len(right_indices) > 0 else 0
+                sum_less[col] = leftindex
+            else:
+                # Use binary location: >= 0 for right, < 0 for left
+                if determine_side == 0:
+                    mask_greater = col_data >= 0
+                    mask_less = col_data < 0
+                else:
+                    mask_greater = col_data > determine_side
+                    mask_less = col_data < -determine_side
+                
+                bvec = np.where(mask_greater, 1, np.where(mask_less, -1, 0))
+                
+                # Binary location logic
+                indices_greater = np.where(bvec == 1)[0] + 1  # +1 for 1-indexing
+                indices_less = np.where(bvec == -1)[0] + 1
+                
+                sum_greater[col] = np.sum(indices_greater) if len(indices_greater) > 0 else 0
+                sum_less[col] = np.sum(indices_less) if len(indices_less) > 0 else 0
+        
+        sum_greater_series = pd.Series(sum_greater)
+        sum_less_series = pd.Series(sum_less)
+        
+        sum_greater_processed = process_counts(sum_greater_series)
+        sum_less_processed = process_counts(sum_less_series)
+
+        df_combined = pd.concat([sum_greater_processed, sum_less_processed])
+        df_combined.index = ['right_side', 'left_side']
+        return df_combined
+
+    def detect_trial_epochs(self):
+        """
+        Detect trial epochs in the data (V1-style).
+        
+        This method identifies trial periods (epochs where flies can make choices)
+        by finding phases that correspond to trial epochs. In V1, these are epochs
+        with tag==1 (trial periods with asymmetric odors, no shock).
+        
+        For V2, we identify trial-like phases (typically "Test" phases or "Initial Valence")
+        and return the first and last trial epochs.
+        
+        Returns:
+        --------
+        tuple
+            (first_trial_data, last_trial_data, first_trial_indices, last_trial_indices) where:
+            - first_trial_data: DataFrame with position data for first trial epoch
+            - last_trial_data: DataFrame with position data for last trial epoch  
+            - first_trial_indices: (start_idx, end_idx) frame indices for first trial (0-based)
+            - last_trial_indices: (start_idx, end_idx) frame indices for last trial (0-based)
+        """
+        if self.raw_data is None:
+            raise ValueError("No data loaded. Call load_data() first.")
+        
+        # Find "Initial Valence" and "Test" phases
+        # V1 uses first trial vs last trial, so we use Initial Valence as first trial and Test as last trial
+        valence_phase = self.raw_data[self.raw_data['experiment_step'] == 'Initial Valence']
+        test_phases = self.raw_data[self.raw_data['experiment_step'] == 'Test']
+        
+        # Determine first and last trial epochs
+        # First trial: Initial Valence (if exists), otherwise first Test phase
+        # Last trial: Last Test phase (if exists), otherwise Initial Valence
+        
+        if len(valence_phase) > 0 and len(test_phases) > 0:
+            # Both phases exist: use Initial Valence as first, Test as last
+            first_trial_data = valence_phase.filter(regex=r'^(Timestamp|chamber_\d+_loc)$')
+            first_trial_data = first_trial_data.reset_index(drop=True)
+            first_start = valence_phase.index[0]
+            first_end = valence_phase.index[-1]
+            
+            # Get last Test phase (all Test phases are typically one continuous block, but get the end)
+            last_test_start_idx = test_phases.index[0]
+            last_test_end_idx = test_phases.index[-1]
+            # Find where Test phase actually ends
+            for i in range(last_test_end_idx + 1, len(self.raw_data)):
+                if self.raw_data.iloc[i]['experiment_step'] != 'Test':
+                    break
+                last_test_end_idx = i
+            
+            last_trial_data = self.raw_data.iloc[last_test_start_idx:last_test_end_idx+1].filter(regex=r'^(Timestamp|chamber_\d+_loc)$')
+            last_trial_data = last_trial_data.reset_index(drop=True)
+            last_start = last_test_start_idx
+            last_end = last_test_end_idx
+            
+        elif len(test_phases) > 0:
+            # Only Test phases exist: check if there are multiple distinct Test blocks
+            # Group consecutive Test phases by checking gaps in indices
+            test_indices = test_phases.index.tolist()
+            test_groups = []
+            if len(test_indices) > 0:
+                current_group_start = test_indices[0]
+                current_group_end = test_indices[0]
+                
+                for i in range(1, len(test_indices)):
+                    # Check if there's a gap (more than 1 index difference indicates non-consecutive)
+                    if test_indices[i] > test_indices[i-1] + 1:
+                        # Gap detected, save current group and start new one
+                        test_groups.append((current_group_start, current_group_end))
+                        current_group_start = test_indices[i]
+                    current_group_end = test_indices[i]
+                
+                # Add the last group
+                test_groups.append((current_group_start, current_group_end))
+            
+            if len(test_groups) >= 2:
+                # Multiple Test blocks: use first as first trial, last as last trial
+                first_start, first_end = test_groups[0]
+                last_start, last_end = test_groups[-1]
+            else:
+                # Single Test block: split it in half for first vs last trial
+                last_start = test_phases.index[0]
+                last_end = test_phases.index[-1]
+                # Find where Test phase actually ends (might extend beyond indexed rows)
+                for i in range(last_end + 1, len(self.raw_data)):
+                    if self.raw_data.iloc[i]['experiment_step'] != 'Test':
+                        break
+                    last_end = i
+                
+                # Split Test phase in half for first vs last
+                test_midpoint = (last_start + last_end) // 2
+                first_start = last_start
+                first_end = test_midpoint
+                last_start = test_midpoint + 1
+            
+            first_trial_data = self.raw_data.iloc[first_start:first_end+1].filter(regex=r'^(Timestamp|chamber_\d+_loc)$')
+            last_trial_data = self.raw_data.iloc[last_start:last_end+1].filter(regex=r'^(Timestamp|chamber_\d+_loc)$')
+            first_trial_data = first_trial_data.reset_index(drop=True)
+            last_trial_data = last_trial_data.reset_index(drop=True)
+            
+        elif len(valence_phase) > 0:
+            # Only Initial Valence exists: split it in half
+            first_start = valence_phase.index[0]
+            first_end = valence_phase.index[-1]
+            valence_midpoint = (first_start + first_end) // 2
+            first_end = valence_midpoint
+            last_start = valence_midpoint + 1
+            last_end = valence_phase.index[-1]
+            
+            first_trial_data = self.raw_data.iloc[first_start:first_end+1].filter(regex=r'^(Timestamp|chamber_\d+_loc)$')
+            last_trial_data = self.raw_data.iloc[last_start:last_end+1].filter(regex=r'^(Timestamp|chamber_\d+_loc)$')
+            first_trial_data = first_trial_data.reset_index(drop=True)
+            last_trial_data = last_trial_data.reset_index(drop=True)
+        else:
+            raise ValueError("No trial epochs found: no 'Test' or 'Initial Valence' phases")
+        
+        return first_trial_data, last_trial_data, (first_start, first_end), (last_start, last_end)
+    
+    def identify_trained_odor_v1(self):
+        """
+        Identify trained odor using V1's logic (from shock patterns).
+        
+        This replicates V1's TrainedOdorIdentifier._find_trained_odor() method:
+        - Finds first shock location
+        - Determines trained odor from odor state at first shock
+        - Returns trained odor as 3-character string [AIR, MCH, OCT]
+        
+        Returns:
+        --------
+        str
+            3-character string encoding trained odor: [AIR, MCH, OCT]
+            Example: '110' = AIR and MCH on, OCT off
+            '010' = only MCH on
+        """
+        if self.raw_data is None:
+            raise ValueError("No data loaded. Call load_data() first.")
+        
+        import numpy as np
+        
+        # Find shock columns
+        shock_cols = [col for col in self.raw_data.columns if 'shock' in col.lower() and 'chamber' in col.lower()]
+        
+        if len(shock_cols) == 0:
+            raise ValueError("No shock columns found in data. Cannot identify trained odor.")
+        
+        # Get shock data - use first fly's shock data (all flies get same training)
+        shock_col = shock_cols[0]  # Use first shock column
+        shock_vector = self.raw_data[shock_col].values
+        
+        # Find first frame where shock was delivered
+        shock_locs = np.where(shock_vector == 1)[0]
+        
+        if len(shock_locs) == 0:
+            raise ValueError("No shock locations found. Cannot identify trained odor.")
+        
+        first_shock_idx = shock_locs[0]
+        first_shock_row = self.raw_data.iloc[first_shock_idx]
+        
+        # Get odor status at first shock
+        odor_columns = ['mch_left_status', 'mch_right_status',
+                       'oct_left_status', 'oct_right_status',
+                       'moil_left_status', 'moil_right_status',
+                       'mch_left_status', 'oct_left_status']  # Add air if available
+        
+        # Check which columns exist
+        available_cols = [col for col in odor_columns if col in self.raw_data.columns]
+        
+        if len(available_cols) < 4:
+            raise ValueError(f"Insufficient odor status columns found. Need at least mch and oct on both sides.")
+        
+        # Build odor state vector (6-element: left AIR, MCH, OCT, right AIR, MCH, OCT)
+        # For V2, we need to infer AIR from absence of other odors, or use a default
+        # V1 uses: [LEFTAIR, LEFTMCH, LEFTOCT, RIGHTAIR, RIGHTMCH, RIGHTOCT]
+        
+        # Try to get odor states
+        mch_left = first_shock_row.get('mch_left_status', 0)
+        mch_right = first_shock_row.get('mch_right_status', 0)
+        oct_left = first_shock_row.get('oct_left_status', 0)
+        oct_right = first_shock_row.get('oct_right_status', 0)
+        moil_left = first_shock_row.get('moil_left_status', 0)
+        moil_right = first_shock_row.get('moil_right_status', 0)
+        
+        # Infer AIR: if no other odor is on, AIR is on (1), otherwise AIR is off (0)
+        # But in V2, we might not have explicit AIR status
+        # For now, assume AIR is on if no other odor is on that side
+        air_left = 1 if (mch_left == 0 and oct_left == 0 and moil_left == 0) else 0
+        air_right = 1 if (mch_right == 0 and oct_right == 0 and moil_right == 0) else 0
+        
+        # Build 6-character odor state string: [LEFTAIR, LEFTMCH, LEFTOCT, RIGHTAIR, RIGHTMCH, RIGHTOCT]
+        # Note: MOIL is not in V1's standard format, so we'll treat it as MCH or OCT for compatibility
+        # For simplicity, if MOIL is present, we'll encode it based on context
+        # But for trained odor identification, we only need left or right side
+        
+        # Get position at first shock to determine which side was trained
+        loc_cols = [col for col in self.raw_data.columns if col.startswith('chamber_') and col.endswith('_loc')]
+        if len(loc_cols) == 0:
+            raise ValueError("No location columns found.")
+        
+        position_snap = first_shock_row[loc_cols[0]]
+        
+        # Determine trained odor based on fly position at first shock
+        # If fly was on left (position <= 0), use left-side odors
+        # If fly was on right (position > 0), use right-side odors
+        if position_snap <= 0:
+            # Fly was on left side: left odors are the trained ones
+            # Convert to 3-character string: [AIR, MCH, OCT]
+            trained_odor = ''.join([str(int(air_left)), str(int(mch_left)), str(int(oct_left))])
+        else:
+            # Fly was on right side: right odors are the trained ones
+            trained_odor = ''.join([str(int(air_right)), str(int(mch_right)), str(int(oct_right))])
+        
+        return trained_odor
+    
     def identify_cs_plus_odor(self):
         """
         Identify CS+ odor based on conditioning type and experimental rules:
@@ -305,6 +709,14 @@ class MultiplexTrial:
                 "midline_borders": getattr(self, 'midline_borders', 'Not set'),
                 "filter_threshold": getattr(self, 'filter_threshold', 'Not set'),
                 "filter_phase": kwargs.get('filter_phase', 'Not specified')
+            }
+        elif analysis_method == 'time-matlab':
+            metadata["analysis_info"]["description"] = "MATLAB-style time analysis - uses index-summing from timeratio_alistair.m"
+            metadata["data_info"]["filtering_details"] = {
+                "midline_borders": getattr(self, 'midline_borders', 'Not set'),
+                "filter_threshold": getattr(self, 'filter_threshold', 'Not set'),
+                "filter_phase": kwargs.get('filter_phase', 'Not specified'),
+                "calculation_method": "Index-summing (MATLAB timeratio_alistair.m replication)"
             }
         elif analysis_method == 'snapshot':
             metadata["analysis_info"]["description"] = "Snapshot population-level analysis - measures fly positions at end of phases"

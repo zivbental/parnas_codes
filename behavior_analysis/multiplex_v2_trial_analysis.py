@@ -9,7 +9,7 @@ from multiplex_analysis import MultiplexTrial
 # Example usage
 if __name__ == "__main__":
     # Load a single Trial to the object
-    file_path = "fly_loc.csv"
+    file_path = r"D:\multiplex\raw_files\new_multiplex_system\system_check\classical_time\02.11.2025\trial_1\fly_loc.csv"
     trial_1 = MultiplexTrial()
     trial_1.load_data(file_path)
 
@@ -20,13 +20,13 @@ if __name__ == "__main__":
     
     # Parameters for side determination and filtering
     determine_side = 10  # Threshold for determining which side flies are on
-    min_valence_seconds = 30  # Minimum seconds in initial valence period for valid fly
+    min_valence_fraction = 0.0  # Minimum fraction of time in initial valence period for valid fly (0.0 to 1.0)
     time_window = [0, 5]  # For snapshot analysis: time range [start_seconds, end_seconds] from phase start
     
     if analysis_method == 'time':
         print("Running TIME-BASED analysis with automatic CS+/CS- detection and side-switching handling...")
         print("This analyzes individual fly time spent on each side.")
-        results = trial_1.analyse_time(determine_side, min_valence_seconds)
+        results = trial_1.analyse_time(determine_side, min_valence_fraction)
         print("\nIndividual fly results:")
         
     elif analysis_method == 'snapshot':
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     
     # Time-based analysis
     print("\n1. TIME-BASED ANALYSIS:")
-    time_results = trial_1.analyse_time(determine_side, min_valence_seconds)
+    time_results = trial_1.analyse_time(determine_side, min_valence_fraction)
     print(f"   Mean learned index: {time_results['learned_index'].mean():.2f}")
     
     # Snapshot analysis
@@ -67,9 +67,12 @@ if __name__ == "__main__":
     # Learning valence analysis
     print("\n3. LEARNING VALENCE ANALYSIS:")
     learning_valence_results = trial_1.analyse_learning_valence(determine_side)
-    print(f"   Mean valence before: {learning_valence_results['valence_before'].mean():.1f}")
-    print(f"   Mean valence after: {learning_valence_results['valence_after'].mean():.1f}")
-    print(f"   Mean learned index: {learning_valence_results['learned_index'].mean():.1f}")
+    if not learning_valence_results.empty:
+        print(f"   Mean valence before: {learning_valence_results['valence_before'].mean():.1f}")
+        print(f"   Mean valence after: {learning_valence_results['valence_after'].mean():.1f}")
+        print(f"   Mean learned index: {learning_valence_results['learned_index'].mean():.1f}")
+    else:
+        print("   No learning valence data - trial may not have this protocol")
     
     # Valence habituation analysis
     print("\n4. VALENCE HABITUATION ANALYSIS:")

@@ -31,7 +31,7 @@ def load_experiment_config(config_path="experiment_config.json"):
         }
 
 
-def collect_trial_data(folder_path, threshold=4, midline_borders=60, filter_phase='both', analysis_method='time', determine_side=10, min_valence_seconds=30, time_window=[0, 5]):
+def collect_trial_data(folder_path, threshold=4, midline_borders=60, filter_phase='both', analysis_method='time', determine_side=10, min_valence_fraction=0.0, time_window=[0, 5]):
     """
     Collect data from all trials in experiment folder with comprehensive tracking
     
@@ -47,12 +47,14 @@ def collect_trial_data(folder_path, threshold=4, midline_borders=60, filter_phas
         Which phases to filter ('both', 'initial', 'test', or 'none')
     analysis_method : str
         Analysis method to use ('time' for time-based individual fly analysis, 
-        'snapshot' for population-level snapshot analysis, 'learning_valence' for learning valence analysis,
+        'snapshot' for population-level snapshot analysis, 
+        'time-matlab' for MATLAB-style index-summing time analysis,
+        'learning_valence' for learning valence analysis,
         'valence_habituation' for valence habituation analysis)
     determine_side : float
         Threshold for determining which side flies are on (0.0 to 100.0)
-    min_valence_seconds : float
-        Minimum number of seconds a fly must spend in initial valence period to be included in analysis
+    min_valence_fraction : float
+        Minimum fraction of time a fly must spend in initial valence period to be included in analysis (0.0 to 1.0)
     time_window : list of two floats
         For snapshot analysis: time range [start_seconds, end_seconds] from phase start to average positions
     
@@ -102,7 +104,9 @@ def collect_trial_data(folder_path, threshold=4, midline_borders=60, filter_phas
                 
                 # Get results with CS+ information using specified analysis method
                 if analysis_method == 'time':
-                    results_df = trial.analyse_time(determine_side, min_valence_seconds, save_to_file=False)
+                    results_df = trial.analyse_time(determine_side, min_valence_fraction, save_to_file=False)
+                elif analysis_method == 'time-matlab':
+                    results_df = trial.analyse_time_matlab(determine_side, min_valence_fraction, save_to_file=False)
                 elif analysis_method == 'snapshot':
                     results_df = trial.analyse_snapshot(determine_side, time_window, save_to_file=False)
                 elif analysis_method == 'learning_valence':
@@ -130,6 +134,23 @@ def collect_trial_data(folder_path, threshold=4, midline_borders=60, filter_phas
                             'test_cs_preference': row['test_cs_preference'],
                             'valid_fly': row.get('valid_fly', True),
                             'analysis_method': 'time'
+                        })
+                    elif analysis_method == 'time-matlab':
+                        # MATLAB-style time-based analysis returns fly-level results
+                        all_results.append({
+                            'genotype': fly_genotype,
+                            'trial_date': date_folder,
+                            'trial_number': trial_folder,
+                            'fly_id': row['fly_id'],
+                            'learned_index': row['learned_index'],
+                            'cs_plus_odor': row['cs_plus_odor'],
+                            'initial_valence_cs_side': row['initial_valence_cs_side'],
+                            'test_cs_side': row['test_cs_side'],
+                            'sides_switched': row['sides_switched'],
+                            'initial_valence_cs_preference': row['initial_valence_cs_preference'],
+                            'test_cs_preference': row['test_cs_preference'],
+                            'valid_fly': row.get('valid_fly', True),
+                            'analysis_method': 'time-matlab'
                         })
                     elif analysis_method == 'snapshot':
                         # Snapshot analysis returns trial-level results
@@ -816,7 +837,7 @@ def save_results_to_csv(folder_path, data, stats_results):
     return output_folder
 
 
-def save_project_metadata(output_folder, config, analysis_method, determine_side, min_valence_seconds, time_window, data, stats_results):
+def save_project_metadata(output_folder, config, analysis_method, determine_side, min_valence_fraction, time_window, data, stats_results):
     """
     Save project analysis metadata including all parameters, version info, and analysis details.
     Creates a comprehensive JSON file for reproducibility and version control.
@@ -832,7 +853,7 @@ def save_project_metadata(output_folder, config, analysis_method, determine_side
         },
         "parameters": {
             "determine_side": determine_side,
-            "min_valence_seconds": min_valence_seconds,
+            "min_valence_fraction": min_valence_fraction,
             "time_window": time_window,
             "analysis_method": analysis_method,
             "experiment_config": config
@@ -850,22 +871,25 @@ def save_project_metadata(output_folder, config, analysis_method, determine_side
             "min_learned_index": float(data['learned_index'].min()) if 'learned_index' in data.columns else None,
             "max_learned_index": float(data['learned_index'].max()) if 'learned_index' in data.columns else None,
             "significant_comparisons": len(stats_results[stats_results['significant'] == True]) if not stats_results.empty and 'significant' in stats_results.columns else 0
-        }
-    }
-    
-    # Add method-specific information
+                }
+     }
+     
+     # Add method-specific information
     if analysis_method == 'time':
-        metadata["analysis_info"]["description"] = "Project-level time-based individual fly analysis - measures time spent on each side for each fly"
-        metadata["data_info"]["fly_level_analysis"] = True
+         metadata["analysis_info"]["description"] = "Project-level time-based individual fly analysis - measures time spent on each side for each fly"
+         metadata["data_info"]["fly_level_analysis"] = True
+    elif analysis_method == 'time-matlab':
+         metadata["analysis_info"]["description"] = "Project-level MATLAB-style time analysis - uses index-summing from timeratio_alistair.m"
+         metadata["data_info"]["fly_level_analysis"] = True
     elif analysis_method == 'snapshot':
-        metadata["analysis_info"]["description"] = "Project-level snapshot population analysis - measures fly positions at end of phases"
-        metadata["data_info"]["population_level_analysis"] = True
+         metadata["analysis_info"]["description"] = "Project-level snapshot population analysis - measures fly positions at end of phases"
+         metadata["data_info"]["population_level_analysis"] = True
     elif analysis_method == 'learning_valence':
-        metadata["analysis_info"]["description"] = "Project-level learning valence analysis - measures changes in valence with learning session"
-        metadata["data_info"]["fly_level_analysis"] = True
+         metadata["analysis_info"]["description"] = "Project-level learning valence analysis - measures changes in valence with learning session"
+         metadata["data_info"]["fly_level_analysis"] = True
     elif analysis_method == 'valence_habituation':
-        metadata["analysis_info"]["description"] = "Project-level valence habituation analysis - measures valence across multiple repeated exposures"
-        metadata["data_info"]["fly_level_analysis"] = True
+         metadata["analysis_info"]["description"] = "Project-level valence habituation analysis - measures valence across multiple repeated exposures"
+         metadata["data_info"]["fly_level_analysis"] = True
     
     # Save metadata to JSON file
     metadata_filename = f"project_analysis_metadata_{analysis_method}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -879,7 +903,7 @@ def save_project_metadata(output_folder, config, analysis_method, determine_side
 
 
 def analyze_experiment_folder(folder_path, config_path="experiment_config.json", 
-                            threshold=4, midline_borders=60, filter_phase='both', analysis_method='time', determine_side=10, min_valence_seconds=30, time_window=[0, 5]):
+                            threshold=4, midline_borders=60, filter_phase='both', analysis_method='time', determine_side=10, min_valence_fraction=0.0, time_window=[0, 5]):
     """
     Main function to analyze an entire experiment folder
     
@@ -900,8 +924,8 @@ def analyze_experiment_folder(folder_path, config_path="experiment_config.json",
         'snapshot' for population-level snapshot analysis)
     determine_side : float
         Threshold for determining which side flies are on (0.0 to 100.0)
-    min_valence_seconds : float
-        Minimum number of seconds a fly must spend in initial valence period to be included in analysis
+    min_valence_fraction : float
+        Minimum fraction of time a fly must spend in initial valence period to be included in analysis (0.0 to 1.0)
     """
     print("="*80)
     print("MULTIPLEX BATCH ANALYSIS")
@@ -920,7 +944,7 @@ def analyze_experiment_folder(folder_path, config_path="experiment_config.json",
     print(f"Filtering parameters: threshold={threshold}, midline_borders={midline_borders}, filter_phase='{filter_phase}'")
     print(f"Analysis parameters: method={analysis_method}, determine_side={determine_side}")
     data = collect_trial_data(folder_path, threshold=threshold, midline_borders=midline_borders, 
-                            filter_phase=filter_phase, analysis_method=analysis_method, determine_side=determine_side, min_valence_seconds=min_valence_seconds, time_window=time_window)
+                            filter_phase=filter_phase, analysis_method=analysis_method, determine_side=determine_side, min_valence_fraction=min_valence_fraction, time_window=time_window)
     
     if data.empty:
         print("No data collected. Exiting.")
@@ -933,7 +957,7 @@ def analyze_experiment_folder(folder_path, config_path="experiment_config.json",
     output_folder = save_results_to_csv(folder_path, data, stats_results)
     
     # Save project analysis metadata
-    save_project_metadata(output_folder, config, analysis_method, determine_side, min_valence_seconds, time_window, data, stats_results)
+    save_project_metadata(output_folder, config, analysis_method, determine_side, min_valence_fraction, time_window, data, stats_results)
     
     # Create plots in the timestamped output folder
     plots_folder = os.path.join(output_folder, 'plots')
@@ -948,14 +972,14 @@ if __name__ == "__main__":
     # ANALYSIS PARAMETERS - Modify these as needed
     # =============================================================================
     ANALYSIS_PARAMS = {
-        'folder_path': r"D:\multiplex\raw_files\new_multiplex_system\system_check\classical_time",
+        'folder_path': r"D:\multiplex\project_students\Noa\exp_noa\vid_exp",
         'config_path': "experiment_config.json",
-        'threshold': 1,                    # Minimum choices required for valid fly
+        'threshold': 4,                    # Minimum choices required for valid fly
         'midline_borders': 60,           # Midline border threshold for filtering (0.0 to 100.0)
         'filter_phase': 'both',           # Which phases to filter: 'both', 'initial', 'test', or 'none'
-        'analysis_method': 'time',    # Analysis method: 'time' for time-based, 'snapshot' for population-level, 'learning_valence', 'valence_habituation'
+        'analysis_method': 'time',    # Analysis method: 'time' for time-based, 'snapshot' for population-level, 'learning_valence', 'valence_habituation', 'time-matlab' for MATLAB-style time analysis
         'determine_side': 0,             # Threshold for determining which side flies are on (0.0 to 100.0)
-        'min_valence_seconds': 0,        # Minimum seconds in initial valence period for valid fly
+        'min_valence_fraction': 0,     # Minimum fraction of time in initial valence period for valid fly (0.0 to 1.0)
         'time_window': [80, 110]             # For snapshot analysis: time range [start_seconds, end_seconds] from phase start
     }
     
@@ -970,6 +994,6 @@ if __name__ == "__main__":
         filter_phase=ANALYSIS_PARAMS['filter_phase'],
         analysis_method=ANALYSIS_PARAMS['analysis_method'],
         determine_side=ANALYSIS_PARAMS['determine_side'],
-        min_valence_seconds=ANALYSIS_PARAMS['min_valence_seconds'],
+        min_valence_fraction=ANALYSIS_PARAMS['min_valence_fraction'],
         time_window=ANALYSIS_PARAMS['time_window']
     )
